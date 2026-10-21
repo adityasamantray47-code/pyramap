@@ -1,0 +1,12 @@
+backend/.env
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/data_cache/
+backend/models/
+*.pyc
+node_modules/
+frontend/dist/
+.DS_Store
+all_states.json
