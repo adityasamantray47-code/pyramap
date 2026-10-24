@@ -146,7 +146,7 @@ def fetch_area_csv_range(
     first = True
     while window_end >= start:
         if not first:
-            time.sleep(0.3)  # stay well under the API's rate limit across hundreds of windows
+            time.sleep(0.1)  # polite pacing, light enough to keep a multi-state pull under ~20 min
         first = False
         window_days = min(max_window, (window_end - start).days + 1)
         try:
