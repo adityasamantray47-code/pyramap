@@ -6,6 +6,7 @@ backend/**/__pycache__/
 backend/data_cache/
 backend/models/
 *.pyc
+*.log
 node_modules/
 frontend/dist/
 .DS_Store

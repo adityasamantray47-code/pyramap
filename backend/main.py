@@ -93,10 +93,16 @@ def thirty_day_outlook(state: str):
     latest = ml_pipeline.predict_latest(bundle["model"], bundle["features"])
     areas = {a.area_id: a for a in forecast_areas_for_state(state.upper())}
 
+    all_driver_labels = []
+    for f in bundle["feature_importance"]:
+        label = FEATURE_LABELS.get(f["feature"], f["feature"])
+        if label not in all_driver_labels:  # week_of_year_sin/cos both mean "time of year"
+            all_driver_labels.append(label)
+    drivers = all_driver_labels[:3]
+
     out = []
     for _, row in latest.iterrows():
         area = areas.get(row["area_id"])
-        drivers = [FEATURE_LABELS.get(f["feature"], f["feature"]) for f in bundle["feature_importance"][:3]]
         out.append(
             {
                 "id": row["area_id"],
