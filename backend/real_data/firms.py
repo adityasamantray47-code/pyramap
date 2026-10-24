@@ -149,7 +149,19 @@ def fetch_area_csv_range(
             time.sleep(0.3)  # stay well under the API's rate limit across hundreds of windows
         first = False
         window_days = min(max_window, (window_end - start).days + 1)
-        df = fetch_area_csv(map_key, source, bbox, window_end, day_range=window_days, timeout=timeout)
+        try:
+            df = fetch_area_csv(map_key, source, bbox, window_end, day_range=window_days, timeout=timeout)
+        except requests.exceptions.HTTPError as exc:
+            # One transient failure (confirmed live: a 400 that succeeded on
+            # retry moments later) shouldn't throw away every other window's
+            # detections for the whole state - retry this window once after a
+            # longer pause, then skip it and keep going if it's still bad.
+            time.sleep(5.0)
+            try:
+                df = fetch_area_csv(map_key, source, bbox, window_end, day_range=window_days, timeout=timeout)
+            except requests.exceptions.HTTPError:
+                print(f"    [firms] skipping window ending {window_end} after retry failed: {exc}")
+                df = pd.DataFrame()
         if not df.empty:
             frames.append(df)
         window_end -= dt.timedelta(days=window_days)

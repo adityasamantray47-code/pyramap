@@ -17,12 +17,18 @@ from __future__ import annotations
 
 import functools
 import io
+import os
 import zipfile
 
 import requests
 import shapefile  # pyshp
 
 CPC_BASE_URL = "https://ftp.cpc.ncep.noaa.gov/GIS/us_tempprcpfcst"
+
+# Each zip is ~50MB and a full 2-year, 50-state pull needs ~24 months x 2
+# kinds of them - cached to disk (not just in-memory) so re-running
+# prepare_data.py after an interruption doesn't re-download ~2.4GB.
+CPC_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data_cache", "cpc_raw")
 
 # Candidate substrings (lowercased) for "shortest lead / next month" shapefiles,
 # checked in order. CPC's naming has used "lead14" (half-month lead counted in
@@ -38,10 +44,20 @@ CATEGORY_MAP = {
 
 @functools.lru_cache(maxsize=32)
 def _download_zip_bytes(year: int, month: int, kind: str, timeout: int) -> bytes:
+    cache_path = os.path.join(CPC_CACHE_DIR, f"{kind}_{year:04d}{month:02d}.zip")
+    if os.path.exists(cache_path):
+        with open(cache_path, "rb") as f:
+            return f.read()
+
     url = f"{CPC_BASE_URL}/{kind}_{year:04d}{month:02d}.zip"
     resp = requests.get(url, timeout=timeout)
     resp.raise_for_status()
-    return resp.content
+    content = resp.content
+
+    os.makedirs(CPC_CACHE_DIR, exist_ok=True)
+    with open(cache_path, "wb") as f:
+        f.write(content)
+    return content
 
 
 def download_zip(year: int, month: int, kind: str = "seastemp", timeout: int = 30) -> zipfile.ZipFile:
