@@ -17,8 +17,17 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import brier_score_loss, roc_auc_score
 
 # How many satellite fire detections in an area in one week counts as a
-# "fire week" for labeling purposes. See NOTE below on calibrating this.
-FIRE_MIN_DETECTIONS = 3
+# "fire week" for labeling purposes.
+#
+# Calibrated against real VIIRS data for Colorado (see prepare_data.py /
+# the project README): at the forecast-area resolution used here (roughly
+# 150km x 200km cells), a threshold of 3 flagged 50% of all area-weeks as
+# "fire weeks" - meaningless as a danger signal, since it's barely more
+# informative than a coin flip and would make the model mostly learn noise
+# from routine small/agricultural heat sources VIIRS also picks up. 20
+# brings that down to ~11%, which is rare enough to be a meaningful signal
+# but still common enough to have real positive examples to learn from.
+FIRE_MIN_DETECTIONS = 20
 
 LEAD_WEEKS = 4  # ~30 days
 LOOKBACK_WEEKS = 4

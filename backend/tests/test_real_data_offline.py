@@ -144,6 +144,7 @@ def test_assemble_state_joins_sources(monkeypatch):
     monkeypatch.setattr("real_data.assemble.HISTORY_WEEKS", 4)  # keep the fake window-walk short
     monkeypatch.setattr("real_data.firms.time.sleep", lambda s: None)  # skip the real politeness delay
     firms.data_availability.cache_clear()
+    cpc.records_for_issue.cache_clear()
 
     df = assemble.assemble_state("CO", map_key="FAKEKEY", verbose=False)
     assert not df.empty

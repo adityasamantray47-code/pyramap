@@ -39,12 +39,23 @@ def _fire_season_weight(week_of_year: int, lat: float) -> float:
     return season * lat_factor
 
 
+def _aridity_factor(lon: float) -> float:
+    """Rough proxy for the west-of-the-100th-meridian aridity gradient in the
+    US: the west is drier and far more fire-prone on average than the humid
+    east, which an earlier version of this generator ignored (giving every
+    state, including wet eastern ones, an unrealistically high fire-week
+    rate). 0.15 (humid east) to 1.0 (arid west); not meant to be precise,
+    just enough to keep practice data roughly regionally plausible."""
+    return float(np.clip((-100 - lon) / 15, 0.15, 1.0))
+
+
 def generate_area_series(area_id: str, lat: float, lon: float, weeks: int = WEEKS_OF_HISTORY) -> pd.DataFrame:
     rng = np.random.default_rng(_seed_for(area_id))
     end = pd.Timestamp.today().normalize()
     end -= pd.Timedelta(days=end.weekday())  # align to Monday
     dates = pd.date_range(end=end, periods=weeks, freq="W-MON")
 
+    aridity = _aridity_factor(lon)
     rows = []
     soil = 0.35 + rng.normal(0, 0.03)
     for i, week_start in enumerate(dates):
@@ -54,13 +65,14 @@ def generate_area_series(area_id: str, lat: float, lon: float, weeks: int = WEEK
         base_temp = 15 + 13 * np.sin((woy - 13) / 52 * 2 * np.pi) + (35 - abs(lat - 35)) * 0.15
         t2m_max = base_temp + rng.normal(0, 3)
 
-        precip = max(0.0, rng.gamma(2.0, 3.0) * (1.0 - 0.5 * max(season, 0)))
+        precip_scale = 3.0 * (1.0 - 0.5 * max(season, 0)) * (1.3 - 0.6 * aridity)
+        precip = max(0.0, rng.gamma(2.0, precip_scale))
 
         soil = np.clip(soil + 0.015 * (precip - 8) / 8 - 0.01 * max(season, 0) + rng.normal(0, 0.01), 0.05, 0.6)
 
         dryness = (1 - soil / 0.6) * 0.6 + max(season, 0) * 0.4
-        fire_rate = max(0.0, (dryness - 0.45)) * 18
-        fire_detections = int(rng.poisson(max(fire_rate, 0.01)))
+        fire_rate = max(0.0, (dryness - 0.5)) * 10 * (0.25 + 0.75 * aridity)
+        fire_detections = int(rng.poisson(max(fire_rate, 0.003)))
 
         # CPC-style monthly outlook, imperfectly anticipating the next month's
         # actual anomaly (gives the model *some* real lead-time signal).

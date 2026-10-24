@@ -46,39 +46,22 @@ def _weekly_power(df: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
-def _cpc_monthly_outlook(lat: float, lon: float, issue_date: dt.date) -> dict:
-    """Fetches the latest CPC monthly outlook zip (falls back a month if the
-    current month's zip isn't published yet) and samples it at (lat, lon).
-    The zip download itself is cached by (year, month, kind), so calling this
-    once per area is cheap - no extra network traffic."""
-    for back in range(3):
-        y, m = issue_date.year, issue_date.month - back
-        while m <= 0:
-            m += 12
-            y -= 1
-        try:
-            temp_zip = cpc.download_zip(y, m, "seastemp")
-            precip_zip = cpc.download_zip(y, m, "seasprcp")
-        except Exception:
-            continue
-        temp_shapes = cpc.list_shapefiles(temp_zip)
-        precip_shapes = cpc.list_shapefiles(precip_zip)
-        temp_name = cpc.pick_shortest_lead(temp_shapes)
-        precip_name = cpc.pick_shortest_lead(precip_shapes)
-        if not temp_name or not precip_name:
-            continue
-        temp_recs = cpc.read_shape_records(temp_zip, temp_name)
-        precip_recs = cpc.read_shape_records(precip_zip, precip_name)
-        temp_rec = cpc.nearest_record(temp_recs, lat, lon)
-        precip_rec = cpc.nearest_record(precip_recs, lat, lon)
-        if temp_rec and precip_rec:
-            return {
-                "cpc_temp_prob": temp_rec["prob"],
-                "cpc_temp_cat": temp_rec["cat"],
-                "cpc_precip_prob": precip_rec["prob"],
-                "cpc_precip_cat": precip_rec["cat"],
-            }
-    return {"cpc_temp_prob": None, "cpc_temp_cat": "normal", "cpc_precip_prob": None, "cpc_precip_cat": "normal"}
+def _add_cpc_outlook(weekly: pd.DataFrame, lat: float, lon: float) -> pd.DataFrame:
+    """Attaches the CPC outlook that was actually valid for each week's
+    calendar month - not today's outlook stamped across all of history (an
+    earlier version of this did that: it called the CPC fetch once per area
+    using today's date, so every one of the ~100 historical weeks in the
+    cache ended up with the exact same cpc_temp_prob/cat, which is wrong -
+    the whole point is that the outlook changes month to month)."""
+    if weekly.empty:
+        for col in ("cpc_temp_prob", "cpc_temp_cat", "cpc_precip_prob", "cpc_precip_cat"):
+            weekly[col] = None
+        return weekly
+    weekly = weekly.copy()
+    months = pd.to_datetime(weekly["week_start"])
+    outlooks = [cpc.outlook_for_month(lat, lon, d.year, d.month) for d in months]
+    outlook_df = pd.DataFrame(outlooks, index=weekly.index)
+    return pd.concat([weekly, outlook_df], axis=1)
 
 
 def assemble_state(state: str, map_key: str, verbose: bool = True) -> pd.DataFrame:
@@ -106,14 +89,12 @@ def assemble_state(state: str, map_key: str, verbose: bool = True) -> pd.DataFra
         try:
             power_df = power.fetch_power_daily(area.lat, area.lon, start, end)
             weekly = _weekly_power(power_df)
-            outlook = _cpc_monthly_outlook(area.lat, area.lon, end)
+            weekly = _add_cpc_outlook(weekly, area.lat, area.lon)
 
             area_fire = fire_by_area[fire_by_area["area_id"] == area.area_id][["week_start", "fire_detections"]]
             out = weekly.merge(area_fire, on="week_start", how="left")
             out["fire_detections"] = out["fire_detections"].fillna(0).astype(int)
             out["area_id"] = area.area_id
-            for k, v in outlook.items():
-                out[k] = v
             frames.append(out)
         except Exception as exc:
             print(f"  [{state}] FAILED {area.area_id}: {exc}")

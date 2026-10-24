@@ -102,3 +102,53 @@ def nearest_record(records: list[dict], lat: float, lon: float) -> dict | None:
     if not records:
         return None
     return min(records, key=lambda r: (r["lat"] - lat) ** 2 + (r["lon"] - lon) ** 2)
+
+
+@functools.lru_cache(maxsize=64)
+def records_for_issue(year: int, month: int, kind: str) -> tuple[dict, ...] | None:
+    """Downloaded zip + shortest-lead shapefile, parsed into records, cached
+    by (year, month, kind) - so sampling the same month's outlook at 6+
+    different forecast-area coordinates only downloads and parses it once.
+    Returns None if that issue's zip/shapefile isn't available."""
+    try:
+        zf = download_zip(year, month, kind)
+    except Exception:
+        return None
+    shapes = list_shapefiles(zf)
+    name = pick_shortest_lead(shapes)
+    if not name:
+        return None
+    return tuple(read_shape_records(zf, name))
+
+
+def outlook_for_month(lat: float, lon: float, target_year: int, target_month: int) -> dict:
+    """The outlook that was actually valid for calendar month
+    (target_year, target_month): the "next month" (lead14) shape from the
+    zip issued the month before. Falls back to earlier issue months (which
+    then means a slightly longer lead, e.g. lead13's 3-month window) if that
+    issue isn't published, so very recent or very old months still get
+    *something* instead of nothing."""
+    issue_year, issue_month = target_year, target_month - 1
+    if issue_month <= 0:
+        issue_month += 12
+        issue_year -= 1
+
+    for back in range(4):
+        y, m = issue_year, issue_month - back
+        while m <= 0:
+            m += 12
+            y -= 1
+        temp_recs = records_for_issue(y, m, "seastemp")
+        precip_recs = records_for_issue(y, m, "seasprcp")
+        if not temp_recs or not precip_recs:
+            continue
+        temp_rec = nearest_record(list(temp_recs), lat, lon)
+        precip_rec = nearest_record(list(precip_recs), lat, lon)
+        if temp_rec and precip_rec:
+            return {
+                "cpc_temp_prob": temp_rec["prob"],
+                "cpc_temp_cat": temp_rec["cat"],
+                "cpc_precip_prob": precip_rec["prob"],
+                "cpc_precip_cat": precip_rec["cat"],
+            }
+    return {"cpc_temp_prob": None, "cpc_temp_cat": "normal", "cpc_precip_prob": None, "cpc_precip_cat": "normal"}
