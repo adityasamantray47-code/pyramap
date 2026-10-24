@@ -20,6 +20,7 @@ import shapefile
 
 sys.path.insert(0, ".")
 
+from grid import forecast_areas_for_state  # noqa: E402
 from real_data import assemble, firms, power, cpc  # noqa: E402
 
 
@@ -59,6 +60,18 @@ def fake_firms_area_csv() -> str:
         "40.60,-105.58,85,2024-08-01,1200",
         "40.61,-105.57,n,2024-08-01,1340",
         "40.62,-105.56,70,2024-08-02,0130",
+    ]
+    return "\n".join(rows)
+
+
+def fake_firms_data_availability(today: dt.date) -> str:
+    # Mirrors the real API: NRT only covers recent months, SP covers the
+    # historical archive, meeting with no gap.
+    nrt_min = today - dt.timedelta(days=60)
+    rows = [
+        "data_id,min_date,max_date",
+        f"VIIRS_SNPP_NRT,{nrt_min.isoformat()},{today.isoformat()}",
+        f"VIIRS_SNPP_SP,2012-01-20,{(nrt_min - dt.timedelta(days=1)).isoformat()}",
     ]
     return "\n".join(rows)
 
@@ -108,22 +121,31 @@ def test_cpc_reads_shapefile_from_zip():
     assert rec["prob"] == 55
 
 
-def test_assemble_area_joins_sources(monkeypatch):
+def test_assemble_state_joins_sources(monkeypatch):
     start = dt.date.today() - dt.timedelta(weeks=4)
     end = dt.date.today()
+    data_availability_calls = []
+    area_csv_calls = []
 
     def fake_get(url, params=None, timeout=None):
         if "power.larc.nasa.gov" in url:
             return FakeResponse(json_data=fake_power_json(start, end))
+        if "data_availability" in url:
+            data_availability_calls.append(url)
+            return FakeResponse(text=fake_firms_data_availability(end))
         if "firms" in url:
+            area_csv_calls.append(url)
             return FakeResponse(text=fake_firms_area_csv())
         raise AssertionError(f"unexpected URL in test: {url}")
 
     monkeypatch.setattr("real_data.power.requests.get", fake_get)
     monkeypatch.setattr("real_data.firms.requests.get", fake_get)
     monkeypatch.setattr("real_data.cpc.download_zip", lambda y, m, kind: zipfile.ZipFile(io.BytesIO(fake_cpc_zip())))
+    monkeypatch.setattr("real_data.assemble.HISTORY_WEEKS", 4)  # keep the fake window-walk short
+    monkeypatch.setattr("real_data.firms.time.sleep", lambda s: None)  # skip the real politeness delay
+    firms.data_availability.cache_clear()
 
-    df = assemble.assemble_area("CO-1", lat=40.6, lon=-105.5, map_key="FAKEKEY")
+    df = assemble.assemble_state("CO", map_key="FAKEKEY", verbose=False)
     assert not df.empty
     for col in [
         "area_id", "week_start", "t2m_max", "precip", "gwetroot",
@@ -131,7 +153,16 @@ def test_assemble_area_joins_sources(monkeypatch):
         "fire_detections",
     ]:
         assert col in df.columns
-    assert (df["area_id"] == "CO-1").all()
+    assert set(df["area_id"].unique()) == {a.area_id for a in forecast_areas_for_state("CO")}
+    # The key efficiency property this test guards: FIRMS is queried once for
+    # the whole state's bbox, not once per area, and data_availability is
+    # cached (called once, not once per area) - this is what avoided the
+    # live 403 rate-limit seen when both were done per-area.
+    assert len(data_availability_calls) == 1
+    # With HISTORY_WEEKS=4 this is a handful of 5-day windows for ONE state-wide
+    # query; if FIRMS were (incorrectly) queried per area again, CO's 6 areas
+    # would multiply this by 6.
+    assert 1 <= len(area_csv_calls) <= 10
 
 
 def test_synthetic_fallback_matches_schema():
@@ -154,7 +185,7 @@ if __name__ == "__main__":
         t()
         print(f"PASS {t.__name__}")
 
-    # test_assemble_area_joins_sources needs a monkeypatch fixture; run it by hand.
+    # test_assemble_state_joins_sources needs a monkeypatch fixture; run it by hand.
     class _MP:
         def setattr(self, target, value):
             import importlib
@@ -173,6 +204,6 @@ if __name__ == "__main__":
                 return
             raise ImportError(f"could not resolve {target}")
 
-    test_assemble_area_joins_sources(_MP())
-    print("PASS test_assemble_area_joins_sources")
+    test_assemble_state_joins_sources(_MP())
+    print("PASS test_assemble_state_joins_sources")
     print("\nAll offline tests passed.")

@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #f5f6f3;
+  --surface: #ffffff;
+  --ink: #1c2420;
+  --ink-2: #4d5852;
+  --forest: #1f5136;
+  --forest-soft: #e6eee8;
+  --rule: #d8ddd8;
+  --fd-low: #2e7d32;
+  --fd-moderate: #1f63b5;
+  --fd-high: #e0b000;
+  --fd-veryhigh: #e8700a;
+  --fd-extreme: #c62828;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #111613;
+    --surface: #181e1a;
+    --ink: #e6ebe7;
+    --ink-2: #b2bcb5;
+    --forest: #7fc79a;
+    --forest-soft: #1d2b22;
+    --rule: #2a322d;
+  }
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  margin: 0;
+  font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.leaflet-container {
+  background: var(--paper) !important;
+  border-radius: 8px;
+}

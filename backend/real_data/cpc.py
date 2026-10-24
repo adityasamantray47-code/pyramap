@@ -15,6 +15,7 @@ mapped the same way (-1 below, 0 normal, 1 above) depending on the file -
 """
 from __future__ import annotations
 
+import functools
 import io
 import zipfile
 
@@ -30,17 +31,26 @@ LEAD_NAME_HINTS = ["lead14", "mon1", "m01", "_01_", "lead1"]
 
 CATEGORY_MAP = {
     "b": "below", "below": "below", "-1": "below",
-    "n": "normal", "normal": "normal", "0": "normal", "e": "normal",
+    "n": "normal", "normal": "normal", "0": "normal", "e": "normal", "ec": "normal",
     "a": "above", "above": "above", "1": "above",
 }
 
 
-def download_zip(year: int, month: int, kind: str = "seastemp", timeout: int = 30) -> zipfile.ZipFile:
-    """kind is 'seastemp' (temperature) or 'seasprcp' (precipitation)."""
+@functools.lru_cache(maxsize=32)
+def _download_zip_bytes(year: int, month: int, kind: str, timeout: int) -> bytes:
     url = f"{CPC_BASE_URL}/{kind}_{year:04d}{month:02d}.zip"
     resp = requests.get(url, timeout=timeout)
     resp.raise_for_status()
-    return zipfile.ZipFile(io.BytesIO(resp.content))
+    return resp.content
+
+
+def download_zip(year: int, month: int, kind: str = "seastemp", timeout: int = 30) -> zipfile.ZipFile:
+    """kind is 'seastemp' (temperature) or 'seasprcp' (precipitation).
+    The outlook only depends on (year, month, kind) - not on location - so
+    every forecast area in every state reuses the same cached download
+    instead of re-fetching this ~50MB zip per area."""
+    content = _download_zip_bytes(year, month, kind, timeout)
+    return zipfile.ZipFile(io.BytesIO(content))
 
 
 def list_shapefiles(zf: zipfile.ZipFile) -> list[str]:
