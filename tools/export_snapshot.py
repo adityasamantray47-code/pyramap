@@ -34,6 +34,7 @@ def build_state_entry(state: str, state_meta: dict) -> dict | None:
         return None
 
     model = result["model"]
+    features = result["features"]
     latest = ml_pipeline.predict_latest(model, features)
     areas = {a.area_id: a for a in forecast_areas_for_state(state)}
 

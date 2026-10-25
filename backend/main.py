@@ -54,7 +54,7 @@ def _get_state_bundle(state: str) -> dict:
         "model": result["model"],
         "metrics": result["metrics"],
         "feature_importance": result["feature_importance"],
-        "features": features,
+        "features": result["features"],
         "raw": df,
         "source": source,
     }
