@@ -149,19 +149,25 @@ def fetch_area_csv_range(
             time.sleep(0.1)  # polite pacing, light enough to keep a multi-state pull under ~20 min
         first = False
         window_days = min(max_window, (window_end - start).days + 1)
-        try:
-            df = fetch_area_csv(map_key, source, bbox, window_end, day_range=window_days, timeout=timeout)
-        except requests.exceptions.HTTPError as exc:
-            # One transient failure (confirmed live: a 400 that succeeded on
-            # retry moments later) shouldn't throw away every other window's
-            # detections for the whole state - retry this window once after a
-            # longer pause, then skip it and keep going if it's still bad.
-            time.sleep(5.0)
+        df = pd.DataFrame()
+        last_exc = None
+        # Confirmed live: 400s can come in sustained runs of many consecutive
+        # windows (looks like temporary server-side throttling under load,
+        # since it always clears up again within the same state's fetch, not
+        # a real malformed request - the exact same URL succeeds standalone).
+        # A couple of retries with growing backoff rides that out instead of
+        # losing a multi-month chunk of one state's fire data.
+        for backoff in (0, 5.0, 15.0):
+            if backoff:
+                time.sleep(backoff)
             try:
                 df = fetch_area_csv(map_key, source, bbox, window_end, day_range=window_days, timeout=timeout)
-            except requests.exceptions.HTTPError:
-                print(f"    [firms] skipping window ending {window_end} after retry failed: {exc}")
-                df = pd.DataFrame()
+                last_exc = None
+                break
+            except requests.exceptions.HTTPError as exc:
+                last_exc = exc
+        if last_exc is not None:
+            print(f"    [firms] skipping window ending {window_end} after retries failed: {last_exc}")
         if not df.empty:
             frames.append(df)
         window_end -= dt.timedelta(days=window_days)
