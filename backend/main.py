@@ -142,6 +142,8 @@ def area_history(area_id: str, days: int = 120):
         "dates": [d.date().isoformat() for d in area_raw["week_start"]],
         "t30": area_raw["cpc_temp_prob"].tolist(),
         "p30": area_raw["cpc_precip_prob"].tolist(),
+        "temp_cat": area_raw["cpc_temp_cat"].tolist(),
+        "precip_cat": area_raw["cpc_precip_cat"].tolist(),
         "fire": area_raw["fire_detections"].tolist(),
         "dc": [round(float(p), 3) for p in probs],
     }

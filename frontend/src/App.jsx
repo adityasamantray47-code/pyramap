@@ -10,6 +10,58 @@ function issuedDateLine(status) {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
+const avg = (nums) => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0);
+
+function trendWord(before, after) {
+  if (after > before * 1.3) return "rising";
+  if (after < before * 0.7) return "easing";
+  return "holding fairly steady";
+}
+
+function outlookWord(cat) {
+  if (cat === "above") return "above-normal";
+  if (cat === "below") return "below-normal";
+  return "near-normal";
+}
+
+// Turns the raw weekly numbers into a few plain-language sentences instead
+// of showing an unreadable list of 15-20 numbers.
+function summarizeHistory(history, soilPct) {
+  const fire = history.fire || [];
+  const dc = history.dc || [];
+  const lines = [];
+  if (fire.length === 0) return lines;
+
+  const half = Math.max(1, Math.floor(fire.length / 2));
+  const earlyAvg = avg(fire.slice(0, half));
+  const recentAvg = avg(fire.slice(-half));
+  lines.push(
+    `Satellite fire detections here have been ${trendWord(earlyAvg, recentAvg)} over the last ${fire.length} weeks — ` +
+      `about ${Math.round(recentAvg)} per week recently, versus ${Math.round(earlyAvg)} earlier in that stretch.`
+  );
+
+  const dryWord = soilPct < 25 ? "unusually dry, which makes fire spread more easily" : soilPct < 45 ? "on the dry side" : "fairly moist, which resists fire";
+  lines.push(`The ground's root-zone moisture is around ${soilPct}% — ${dryWord}.`);
+
+  const tempCat = history.temp_cat?.at(-1);
+  const precipCat = history.precip_cat?.at(-1);
+  if (tempCat && precipCat) {
+    lines.push(
+      `NOAA's latest monthly outlook calls for ${outlookWord(tempCat)} temperatures and ${outlookWord(precipCat)} rainfall here over the next month.`
+    );
+  }
+
+  if (dc.length >= 2) {
+    const first = dc[0];
+    const last = dc.at(-1);
+    lines.push(
+      `Our model's estimated fire-danger probability has gone from ${Math.round(first * 100)}% to ${Math.round(last * 100)}% ` +
+        `over this period, ${trendWord(first, last)}.`
+    );
+  }
+  return lines;
+}
+
 export default function App() {
   const [states, setStates] = useState([]);
   const [status, setStatus] = useState(null);
@@ -151,8 +203,10 @@ export default function App() {
             <h2 className="h-section">30-day outlook by forecast area</h2>
             {metrics && (
               <p className="lede" style={{ marginTop: 6, fontSize: "0.88rem" }}>
-                Model performance on held-out data: ROC-AUC {metrics.metrics.roc_auc ?? "n/a"}, Brier skill vs.
-                climatology {metrics.metrics.brier_skill_score ?? "n/a"} · source: {metrics.source}
+                In tests on past data, this forecast told high-risk weeks apart from low-risk ones about{" "}
+                {Math.round((metrics.metrics.roc_auc ?? 0.5) * 100)}% as well as a perfect model would (ROC-AUC{" "}
+                {metrics.metrics.roc_auc ?? "n/a"}), using {metrics.source === "real" ? "real NASA/NOAA" : "practice"}{" "}
+                data. Mainly driven by: {outlook[0]?.drivers?.join(", ") || "seasonal fire history"}.
               </p>
             )}
 
@@ -164,7 +218,6 @@ export default function App() {
                     <th>Danger</th>
                     <th>Probability</th>
                     <th>Root soil wetness</th>
-                    <th>Why</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -179,34 +232,26 @@ export default function App() {
                         {Math.round(row.root_soil_wetness * 100)}%
                         {row.root_soil_wetness < 0.25 ? " (drier, riskier)" : ""}
                       </td>
-                      <td className="why">{row.drivers.join(", ")}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <p className="hint" style={{ padding: "0 14px 12px" }}>
+                Click a row to see what's been happening in that area recently.
+              </p>
             </div>
 
             {selectedArea && history && (
               <div className="card history-panel">
-                <h3>
-                  {selectedArea} · last {history.dates.length} weeks
-                </h3>
-                <div className="history-row">
-                  <b>Weekly fire detections</b>
-                  <span>{history.fire.join(", ")}</span>
-                </div>
-                <div className="history-row">
-                  <b>NOAA temp. outlook probability</b>
-                  <span>{history.t30.join(", ")}</span>
-                </div>
-                <div className="history-row">
-                  <b>NOAA precip. outlook probability</b>
-                  <span>{history.p30.join(", ")}</span>
-                </div>
-                <div className="history-row">
-                  <b>Modeled danger probability</b>
-                  <span>{history.dc.join(", ")}</span>
-                </div>
+                <h3>What's going on in {selectedArea}?</h3>
+                {summarizeHistory(
+                  history,
+                  Math.round((outlook.find((o) => o.id === selectedArea)?.root_soil_wetness ?? 0) * 100)
+                ).map((line, i) => (
+                  <p key={i} className="lede" style={{ marginTop: i === 0 ? 0 : 10, fontSize: "0.92rem" }}>
+                    {line}
+                  </p>
+                ))}
               </div>
             )}
           </section>
