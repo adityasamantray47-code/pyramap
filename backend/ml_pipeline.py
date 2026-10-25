@@ -16,18 +16,41 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import brier_score_loss, roc_auc_score
 
-# How many satellite fire detections in an area in one week counts as a
-# "fire week" for labeling purposes.
+# "Fire week" threshold: an area's own FIRE_PERCENTILE of its weekly VIIRS
+# detection counts, floored at FIRE_MIN_DETECTIONS.
 #
-# Calibrated against real VIIRS data for Colorado (see prepare_data.py /
-# the project README): at the forecast-area resolution used here (roughly
-# 150km x 200km cells), a threshold of 3 flagged 50% of all area-weeks as
-# "fire weeks" - meaningless as a danger signal, since it's barely more
-# informative than a coin flip and would make the model mostly learn noise
-# from routine small/agricultural heat sources VIIRS also picks up. 20
-# brings that down to ~11%, which is rare enough to be a meaningful signal
-# but still common enough to have real positive examples to learn from.
+# A single global absolute count doesn't fit every state. Calibrated against
+# real Colorado data, a flat threshold of 3 flagged 50% of all area-weeks as
+# "fire weeks" (meaningless - barely better than a coin flip); 20 brought
+# that to ~11%, a reasonable Colorado-specific number. But Texas's routine
+# winter/spring agricultural and rangeland burning alone produces far more
+# VIIRS detections per week than Colorado's wildfire season does (confirmed
+# live: Texas forecast areas have a 90th-percentile weekly count of 60-680,
+# vs. Colorado's 5-100) - so the flat threshold of 20 flagged ~96% of all
+# Texas weeks as "dangerous," which is just as uninformative as the original
+# threshold of 3 was for Colorado.
+#
+# Comparing each area against its OWN typical activity instead asks "is this
+# an unusually active week for this specific place," which is the thing that
+# actually matters for a danger signal, and adapts automatically per region
+# without needing a per-state constant maintained by hand. FIRE_MIN_DETECTIONS
+# is now just a floor, so a near-zero-activity area (e.g. coastal New England)
+# doesn't flag on single-digit background noise.
+FIRE_PERCENTILE = 0.90
 FIRE_MIN_DETECTIONS = 20
+
+
+def area_fire_thresholds(df: pd.DataFrame) -> dict[str, float]:
+    """One threshold per area_id, from that area's own historical
+    fire_detections distribution. Uses the whole history passed in (not
+    split by train/test) - this defines what "fire week" MEANS for an area,
+    which is a label-definition choice, not a per-row feature value, so it
+    doesn't leak test-period information into training features the way
+    area_climatology did (see train_model). A test-period extreme can still
+    nudge the threshold itself slightly; that's an accepted simplification,
+    not the severe feature-level leak that was fixed there."""
+    p = df.groupby("area_id")["fire_detections"].quantile(FIRE_PERCENTILE)
+    return p.clip(lower=FIRE_MIN_DETECTIONS).to_dict()
 
 LEAD_WEEKS = 4  # ~30 days
 LOOKBACK_WEEKS = 4
@@ -57,11 +80,13 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     full-history for the deployed model - so it's attached by the caller
     (train_model) instead of baked in here."""
     df = df.sort_values(["area_id", "week_start"]).reset_index(drop=True)
+    thresholds = area_fire_thresholds(df)
 
     rows = []
     for area_id, g in df.groupby("area_id"):
         g = g.reset_index(drop=True)
         n = len(g)
+        threshold = thresholds[area_id]
         for i in range(n):
             lo = max(0, i - LOOKBACK_WEEKS + 1)
             window = g.iloc[lo : i + 1]
@@ -87,7 +112,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
                     "cpc_precip_cat_num": CAT_MAP.get(g.loc[i, "cpc_precip_cat"], 0),
                     "week_of_year_sin": np.sin(2 * np.pi * woy / 52),
                     "week_of_year_cos": np.cos(2 * np.pi * woy / 52),
-                    "label": int(future["fire_detections"].ge(FIRE_MIN_DETECTIONS).any()),
+                    "label": int(future["fire_detections"].ge(threshold).any()),
                 }
             )
     return pd.DataFrame(rows)
@@ -111,11 +136,13 @@ def _attach_climatology(features: pd.DataFrame, clim_map: dict, default: float) 
 
 
 def fire_week_frequency(df: pd.DataFrame) -> float:
-    """Fraction of (area, week) rows that qualify as a fire week. Used to
-    sanity-check FIRE_MIN_DETECTIONS - if this is near 1.0, the threshold is
-    too low (everything looks dangerous); near 0 with zero positive weeks
-    anywhere, it's too high."""
-    fire_week = df["fire_detections"] >= FIRE_MIN_DETECTIONS
+    """Fraction of (area, week) rows that qualify as a fire week under each
+    area's own adaptive threshold (area_fire_thresholds). Used to sanity-
+    check that threshold - if this is near 1.0, it's too low (everything
+    looks dangerous); near 0 with zero positive weeks anywhere, too high."""
+    thresholds = area_fire_thresholds(df)
+    threshold_per_row = df["area_id"].map(thresholds)
+    fire_week = df["fire_detections"] >= threshold_per_row
     return float(fire_week.mean())
 
 
