@@ -1,44 +1,318 @@
 @import "tailwindcss";
 
 :root {
-  --paper: #f5f6f3;
-  --surface: #ffffff;
-  --ink: #1c2420;
-  --ink-2: #4d5852;
-  --forest: #1f5136;
-  --forest-soft: #e6eee8;
-  --rule: #d8ddd8;
-  --fd-low: #2e7d32;
-  --fd-moderate: #1f63b5;
-  --fd-high: #e0b000;
-  --fd-veryhigh: #e8700a;
-  --fd-extreme: #c62828;
+  --bg: #1b1b1e;
+  --surface: #232327;
+  --surface-2: #2b2b30;
+  --ink: #e6e6e6;
+  --ink-2: #a3a3aa;
+  --ink-3: #78787f;
+  --rule: #38383e;
+  --rule-strong: #47474e;
+
+  --brand: #ff6b35;
+  --brand-ink: #ffffff;
+
+  --fd-low: #90be6d;
+  --fd-moderate: #f9c74f;
+  --fd-high: #ff6b35;
+  --fd-veryhigh: #f3722c;
+  --fd-extreme: #f94144;
+  --fd-moderate-ink: #2a2100;
+
+  --font-head: "Manrope", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-ui: "Manrope", "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #111613;
-    --surface: #181e1a;
-    --ink: #e6ebe7;
-    --ink-2: #b2bcb5;
-    --forest: #7fc79a;
-    --forest-soft: #1d2b22;
-    --rule: #2a322d;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
 }
 
 body {
-  background: var(--paper);
+  background: var(--bg);
   color: var(--ink);
   margin: 0;
-  font-family: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 #root {
   min-height: 100vh;
 }
 
-.leaflet-container {
-  background: var(--paper) !important;
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Masthead ---- */
+.masthead {
+  background: linear-gradient(135deg, #1b1b1e 0%, #241f1a 100%);
+  border-bottom: 1px solid var(--rule);
+}
+.masthead-inner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 24px;
+  max-width: 1240px;
+  margin: 0 auto;
+}
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--fd-extreme) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-size: 1.3rem;
+}
+.brand-title {
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 1.3rem;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: #fff;
+}
+.brand-sub {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+.issued-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.85rem;
+  color: var(--ink-2);
+}
+.issued-bar-inner {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 8px 24px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.issued-bar b {
+  color: var(--ink);
+}
+
+/* ---- Layout ---- */
+.page-wrap {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 28px 24px 56px;
+}
+.h-section {
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 1.35rem;
+  line-height: 1.25;
+  margin: 0 0 2px;
+  color: #fff;
+}
+.h-small {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+.lede {
+  font-size: 1rem;
+  color: var(--ink-2);
+  max-width: 62ch;
+  margin: 4px 0 0;
+}
+
+/* ---- Danger scale legend ---- */
+.scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
   border-radius: 8px;
+  overflow: hidden;
+  margin-top: 16px;
+}
+.scale span {
+  flex: 1 1 0;
+  min-width: 90px;
+  padding: 9px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #fff;
+  text-align: center;
+  line-height: 1.3;
+}
+.scale .lo {
+  background: var(--fd-low);
+  color: #142b0a;
+}
+.scale .mo {
+  background: var(--fd-moderate);
+  color: var(--fd-moderate-ink);
+}
+.scale .hi {
+  background: var(--fd-high);
+}
+.scale .vh {
+  background: var(--fd-veryhigh);
+}
+.scale .ex {
+  background: var(--fd-extreme);
+}
+
+/* ---- Cards ---- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+.map-card {
+  padding: 14px 14px 8px;
+}
+.map-card .hint {
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  color: var(--ink-2);
+}
+.leaflet-container {
+  background: var(--surface-2) !important;
+  border-radius: 8px;
+  filter: saturate(0.85) brightness(0.92);
+}
+
+.state-list {
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 10px;
+}
+.state-list-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  border-left: 3px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+.state-list-item:hover {
+  background: var(--surface-2);
+}
+.state-list-item.active {
+  background: var(--surface-2);
+  border-left-color: var(--brand);
+  font-weight: 700;
+  color: #fff;
+}
+.state-list-item .tag {
+  opacity: 0.6;
+  font-size: 0.8rem;
+}
+
+/* ---- Outlook table ---- */
+.outlook-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  background: var(--surface);
+}
+.outlook-table th {
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--rule-strong);
+}
+.outlook-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+.outlook-table tbody tr {
+  cursor: pointer;
+}
+.outlook-table tbody tr:hover {
+  background: var(--surface-2);
+}
+.outlook-table .area-id {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+}
+.outlook-table .why {
+  font-size: 0.82rem;
+  color: var(--ink-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #fff;
+  white-space: nowrap;
+}
+.chip.lo {
+  color: #142b0a;
+}
+.chip.mo {
+  color: var(--fd-moderate-ink);
+}
+
+/* ---- Area history inset ---- */
+.history-panel {
+  margin-top: 16px;
+  padding: 16px;
+}
+.history-panel h3 {
+  font-family: var(--font-head);
+  font-weight: 700;
+  font-size: 1.05rem;
+  margin: 0 0 10px;
+  color: #fff;
+}
+.history-row {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 4px 12px;
+  font-size: 0.84rem;
+  color: var(--ink-2);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.history-row:last-child {
+  border-bottom: none;
+}
+.history-row b {
+  color: var(--ink);
+  font-weight: 600;
 }

@@ -4,6 +4,12 @@ import "leaflet/dist/leaflet.css";
 import { api } from "./api";
 import DangerChip from "./DangerChip";
 
+function issuedDateLine(status) {
+  if (!status?.data_through) return null;
+  const d = new Date(status.data_through + "T00:00:00");
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+}
+
 export default function App() {
   const [states, setStates] = useState([]);
   const [status, setStatus] = useState(null);
@@ -43,34 +49,58 @@ export default function App() {
   const selectedStateMeta = useMemo(() => states.find((s) => s.code === selected), [states, selected]);
 
   return (
-    <div style={{ background: "var(--paper)", minHeight: "100vh" }}>
-      <header style={{ background: "var(--forest)", color: "#fff" }} className="px-4 py-3">
-        <div className="max-w-6xl mx-auto flex items-center justify-between flex-wrap gap-2">
+    <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
+      <div className="masthead">
+        <div className="masthead-inner">
+          <div className="brand-mark">🔥</div>
           <div>
-            <strong className="text-lg font-extrabold">Long-Lead Wildfire Outlook</strong>
-            <div className="text-sm opacity-85">30-day-ahead wildfire danger for the US</div>
+            <p className="brand-title">Long-Lead Wildfire Outlook</p>
+            <p className="brand-sub">A 30-day-ahead wildfire danger outlook for the United States</p>
           </div>
-          {status && (
-            <div className="text-sm bg-white/10 rounded px-3 py-1">
-              Based on data through <b>{status.data_through || "—"}</b>
-              {" · "}
-              {status.states_with_real_data.length} states with live data,{" "}
-              {status.states_with_synthetic_data.length} using practice data
-            </div>
-          )}
         </div>
-      </header>
+      </div>
 
-      <main className="max-w-6xl mx-auto px-4 py-6">
+      {status && (
+        <div className="issued-bar">
+          <div className="issued-bar-inner">
+            <span>
+              Based on data through <b>{issuedDateLine(status) || "—"}</b>
+            </span>
+            <span>·</span>
+            <span>
+              <b className="num">{status.states_with_real_data.length}</b> states on live NASA/NOAA data,{" "}
+              <b className="num">{status.states_with_synthetic_data.length}</b> on practice data
+            </span>
+          </div>
+        </div>
+      )}
+
+      <main className="page-wrap">
+        <div className="mb-6">
+          <p className="h-small">Public outlook · updated weekly</p>
+          <h1 className="h-section" style={{ fontSize: "1.7rem" }}>
+            Where fire danger is building, 30 days out
+          </h1>
+          <p className="lede">
+            Built from NASA satellite fire detections, NASA weather &amp; soil-moisture data, and NOAA's
+            monthly climate outlook. Pick a state to see its forecast areas below.
+          </p>
+          <div className="scale">
+            <span className="lo">Low</span>
+            <span className="mo">Moderate</span>
+            <span className="hi">High</span>
+            <span className="vh">Very High</span>
+            <span className="ex">Extreme</span>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-[1fr_320px] gap-6 items-start">
-          <div
-            className="rounded border overflow-hidden"
-            style={{ borderColor: "var(--rule)", background: "var(--surface)" }}
-          >
-            <MapContainer center={[39.5, -98.35]} zoom={4} style={{ height: 480, width: "100%" }}>
+          <div className="card map-card">
+            <p className="hint">Click a state, or choose one from the list.</p>
+            <MapContainer center={[39.5, -98.35]} zoom={4} style={{ height: 460, width: "100%" }}>
               <TileLayer
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution='&copy; OpenStreetMap contributors'
+                attribution="&copy; OpenStreetMap contributors"
               />
               {states.map((s) => (
                 <CircleMarker
@@ -78,87 +108,78 @@ export default function App() {
                   center={[s.lat, s.lon]}
                   radius={selected === s.code ? 10 : 6}
                   pathOptions={{
-                    color: s.has_real_data ? "#1f5136" : "#8b968f",
-                    fillColor: s.has_real_data ? "#1f5136" : "#8b968f",
-                    fillOpacity: 0.7,
+                    color: s.has_real_data ? "#ff6b35" : "#78787f",
+                    fillColor: s.has_real_data ? "#ff6b35" : "#78787f",
+                    fillOpacity: 0.75,
+                    weight: selected === s.code ? 3 : 1,
                   }}
                   eventHandlers={{ click: () => setSelected(s.code) }}
                 >
-                  <Tooltip>{s.name}{s.has_real_data ? "" : " (practice data)"}</Tooltip>
+                  <Tooltip>
+                    {s.name}
+                    {s.has_real_data ? "" : " (practice data)"}
+                  </Tooltip>
                 </CircleMarker>
               ))}
             </MapContainer>
           </div>
 
-          <div
-            className="rounded border p-3 max-h-[480px] overflow-y-auto"
-            style={{ borderColor: "var(--rule)", background: "var(--surface)" }}
-          >
-            <div className="text-xs font-bold uppercase tracking-wide mb-2" style={{ color: "var(--ink-2)" }}>
+          <div className="card">
+            <p className="h-small" style={{ padding: "12px 14px 0" }}>
               Choose a state
-            </div>
-            <ul>
+            </p>
+            <div className="state-list">
               {states.map((s) => (
-                <li key={s.code}>
-                  <button
-                    onClick={() => setSelected(s.code)}
-                    className="w-full text-left px-2 py-1.5 rounded text-sm"
-                    style={{
-                      background: selected === s.code ? "var(--forest-soft)" : "transparent",
-                      fontWeight: selected === s.code ? 700 : 400,
-                    }}
-                  >
-                    {s.name} {!s.has_real_data && <span className="opacity-60">(practice)</span>}
-                  </button>
-                </li>
+                <button
+                  key={s.code}
+                  onClick={() => setSelected(s.code)}
+                  className={`state-list-item${selected === s.code ? " active" : ""}`}
+                >
+                  {s.name} {!s.has_real_data && <span className="tag">(practice)</span>}
+                </button>
               ))}
-            </ul>
+            </div>
           </div>
         </div>
 
-        {error && <p className="text-red-600 mt-4">{error}</p>}
-        {loading && <p className="mt-4">Loading outlook for {selectedStateMeta?.name}…</p>}
+        {error && <p style={{ color: "var(--fd-extreme)", marginTop: 16 }}>{error}</p>}
+        {loading && <p style={{ marginTop: 16, color: "var(--ink-2)" }}>Loading outlook for {selectedStateMeta?.name}…</p>}
 
         {!loading && selected && outlook.length > 0 && (
-          <section className="mt-6">
-            <h2 className="text-xl font-bold mb-1">{selectedStateMeta?.name}: 30-day outlook</h2>
+          <section style={{ marginTop: 28 }}>
+            <p className="h-small">{selectedStateMeta?.name}</p>
+            <h2 className="h-section">30-day outlook by forecast area</h2>
             {metrics && (
-              <p className="text-sm mb-3" style={{ color: "var(--ink-2)" }}>
-                Model: ROC-AUC {metrics.metrics.roc_auc ?? "n/a"}, Brier skill vs. climatology{" "}
-                {metrics.metrics.brier_skill_score ?? "n/a"} · source: {metrics.source}
+              <p className="lede" style={{ marginTop: 6, fontSize: "0.88rem" }}>
+                Model performance on held-out data: ROC-AUC {metrics.metrics.roc_auc ?? "n/a"}, Brier skill vs.
+                climatology {metrics.metrics.brier_skill_score ?? "n/a"} · source: {metrics.source}
               </p>
             )}
-            <div className="overflow-x-auto rounded border" style={{ borderColor: "var(--rule)" }}>
-              <table className="w-full text-sm" style={{ background: "var(--surface)" }}>
+
+            <div className="card" style={{ marginTop: 14, overflowX: "auto" }}>
+              <table className="outlook-table">
                 <thead>
-                  <tr className="text-left border-b" style={{ borderColor: "var(--rule)" }}>
-                    <th className="p-2">Area</th>
-                    <th className="p-2">Danger</th>
-                    <th className="p-2">Probability</th>
-                    <th className="p-2">Root soil wetness</th>
-                    <th className="p-2">Why</th>
+                  <tr>
+                    <th>Area</th>
+                    <th>Danger</th>
+                    <th>Probability</th>
+                    <th>Root soil wetness</th>
+                    <th>Why</th>
                   </tr>
                 </thead>
                 <tbody>
                   {outlook.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-b cursor-pointer hover:bg-black/5"
-                      style={{ borderColor: "var(--rule)" }}
-                      onClick={() => setSelectedArea(row.id)}
-                    >
-                      <td className="p-2 font-mono">{row.id}</td>
-                      <td className="p-2">
+                    <tr key={row.id} onClick={() => setSelectedArea(row.id)}>
+                      <td className="area-id">{row.id}</td>
+                      <td>
                         <DangerChip danger_class={row.danger_class} />
                       </td>
-                      <td className="p-2">{Math.round(row.danger_prob * 100)}%</td>
-                      <td className="p-2">
+                      <td className="num">{Math.round(row.danger_prob * 100)}%</td>
+                      <td className="num">
                         {Math.round(row.root_soil_wetness * 100)}%
                         {row.root_soil_wetness < 0.25 ? " (drier, riskier)" : ""}
                       </td>
-                      <td className="p-2 text-xs" style={{ color: "var(--ink-2)" }}>
-                        {row.drivers.join(", ")}
-                      </td>
+                      <td className="why">{row.drivers.join(", ")}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -166,13 +187,25 @@ export default function App() {
             </div>
 
             {selectedArea && history && (
-              <div className="mt-4 rounded border p-3" style={{ borderColor: "var(--rule)", background: "var(--surface)" }}>
-                <h3 className="font-bold mb-2">{selectedArea} · last {history.dates.length} weeks</h3>
-                <div className="text-xs grid grid-cols-1 gap-1" style={{ color: "var(--ink-2)" }}>
-                  <div>Weekly fire detections: {history.fire.join(", ")}</div>
-                  <div>CPC temp outlook probability: {history.t30.join(", ")}</div>
-                  <div>CPC precip outlook probability: {history.p30.join(", ")}</div>
-                  <div>Modeled danger probability over time: {history.dc.join(", ")}</div>
+              <div className="card history-panel">
+                <h3>
+                  {selectedArea} · last {history.dates.length} weeks
+                </h3>
+                <div className="history-row">
+                  <b>Weekly fire detections</b>
+                  <span>{history.fire.join(", ")}</span>
+                </div>
+                <div className="history-row">
+                  <b>NOAA temp. outlook probability</b>
+                  <span>{history.t30.join(", ")}</span>
+                </div>
+                <div className="history-row">
+                  <b>NOAA precip. outlook probability</b>
+                  <span>{history.p30.join(", ")}</span>
+                </div>
+                <div className="history-row">
+                  <b>Modeled danger probability</b>
+                  <span>{history.dc.join(", ")}</span>
                 </div>
               </div>
             )}

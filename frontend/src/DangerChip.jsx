@@ -6,14 +6,13 @@ const COLORS = {
   Extreme: "var(--fd-extreme)",
 };
 
+const DARK_TEXT = { Low: "lo", Moderate: "mo" };
+
 export default function DangerChip({ danger_class }) {
-  const bg = COLORS[danger_class] || "var(--ink-2)";
-  const darkText = danger_class === "High";
+  const bg = COLORS[danger_class] || "var(--ink-3)";
+  const cls = DARK_TEXT[danger_class] || "";
   return (
-    <span
-      className="inline-flex items-center rounded px-2 py-0.5 text-xs font-bold uppercase tracking-wide"
-      style={{ background: bg, color: darkText ? "#3b2f00" : "#fff" }}
-    >
+    <span className={`chip${cls ? " " + cls : ""}`} style={{ background: bg }}>
       {danger_class}
     </span>
   );
