@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import data_ingestion
 import ml_pipeline
-from grid import ALL_STATES, STATE_NAMES, forecast_areas_for_state
+from grid import ALL_STATES, STATE_BBOX, STATE_NAMES, forecast_areas_for_state
 
 app = FastAPI(title="Long-Lead Wildfire Outlook API")
 
@@ -35,6 +35,54 @@ FEATURE_LABELS = {
     "week_of_year_cos": "time of year",
     "area_climatology": "this area's fire history for this time of year",
 }
+
+# For area-specific reasoning: (plain label, unit, value*scale=display units,
+# True if a LOWER value raises fire risk).
+REASON_FEATURES = {
+    "gwetroot_latest": ("root-zone soil moisture", "%", 100, True),
+    "t2m_max_4wk_avg": ("recent max temperatures", "°C", 1, False),
+    "precip_4wk_sum": ("rainfall over the last month", "mm", 1, True),
+}
+
+
+def _region_name(area, state: str) -> str:
+    """Plain-language location within the state, e.g. "Northeast Texas",
+    since area ids like "TX-5" mean nothing to a general reader."""
+    lat_min, lat_max, lon_min, lon_max = STATE_BBOX[state]
+    lat_mid, lon_mid = (lat_min + lat_max) / 2, (lon_min + lon_max) / 2
+    lat_band, lon_band = (lat_max - lat_min) / 6, (lon_max - lon_min) / 6
+    ns = "North" if area.lat > lat_mid + lat_band else "South" if area.lat < lat_mid - lat_band else ""
+    ew = "East" if area.lon > lon_mid + lon_band else "West" if area.lon < lon_mid - lon_band else ""
+    direction = f"{ns}{ew.lower()}" if ns and ew else (ns or ew or "Central")
+    return f"{direction} {STATE_NAMES[state]}"
+
+
+def _area_reasons(area_history: pd.DataFrame, latest_row, climatology: float) -> list[str]:
+    """Compares this area's current conditions to its OWN historical typical
+    values (not a global/other-area comparison), so the explanation is
+    honestly specific to this area rather than a generic restatement of
+    which features matter state-wide."""
+    reasons = []
+    for feature, (label, unit, scale, lower_is_riskier) in REASON_FEATURES.items():
+        series = area_history[feature].dropna()
+        if series.empty:
+            continue
+        typical = float(series.mean())
+        current = float(latest_row[feature])
+        if abs(typical) < 1e-6 or abs(current - typical) / (abs(typical) + 1e-6) < 0.12:
+            continue  # not meaningfully different from this area's norm
+        lower = current < typical
+        effect = "raising" if lower == lower_is_riskier else "lowering"
+        reasons.append(
+            f"{label.capitalize()}, {'lower' if lower else 'higher'} than usual here: "
+            f"{current * scale:.0f}{unit} vs. a typical {typical * scale:.0f}{unit} — {effect} fire risk."
+        )
+    if climatology > 0.15:
+        reasons.append(
+            f"This time of year is historically one of the more active stretches for fire in this area "
+            f"(elevated conditions in roughly {round(climatology * 100)}% of years)."
+        )
+    return reasons[:3]
 
 
 def _get_state_bundle(state: str) -> dict:
@@ -87,9 +135,11 @@ def data_status():
 
 @app.get("/api/30-day-outlook")
 def thirty_day_outlook(state: str):
+    state = state.upper()
     bundle = _get_state_bundle(state)
     latest = ml_pipeline.predict_latest(bundle["model"], bundle["features"])
-    areas = {a.area_id: a for a in forecast_areas_for_state(state.upper())}
+    areas = {a.area_id: a for a in forecast_areas_for_state(state)}
+    features = bundle["features"]
 
     all_driver_labels = []
     for f in bundle["feature_importance"]:
@@ -101,16 +151,20 @@ def thirty_day_outlook(state: str):
     out = []
     for _, row in latest.iterrows():
         area = areas.get(row["area_id"])
+        area_history = features[features["area_id"] == row["area_id"]]
         out.append(
             {
                 "id": row["area_id"],
+                "region": _region_name(area, state) if area else row["area_id"],
                 "lat": area.lat if area else None,
                 "lon": area.lon if area else None,
+                "bbox": [area.lat_min, area.lon_min, area.lat_max, area.lon_max] if area else None,
                 "as_of": row["week_start"].date().isoformat(),
                 "danger_prob": round(float(row["danger_prob"]), 3),
                 "danger_class": row["danger_class"],
                 "root_soil_wetness": round(float(row["gwetroot_latest"]), 3),
                 "drivers": drivers,
+                "reasons": _area_reasons(area_history, row, float(row["area_climatology"])),
             }
         )
     return out

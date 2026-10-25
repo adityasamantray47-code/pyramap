@@ -3,6 +3,9 @@ import { MapContainer, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "./api";
 import DangerChip from "./DangerChip";
+import StateAreaMap from "./StateAreaMap";
+import TrendChart from "./TrendChart";
+import { DANGER_HEX } from "./dangerColors";
 
 function issuedDateLine(status) {
   if (!status?.data_through) return null;
@@ -24,8 +27,8 @@ function outlookWord(cat) {
   return "near-normal";
 }
 
-// Turns the raw weekly numbers into a few plain-language sentences instead
-// of showing an unreadable list of 15-20 numbers.
+// Turns the raw weekly numbers into a few plain-language sentences, read
+// alongside the charts below rather than instead of them.
 function summarizeHistory(history, soilPct) {
   const fire = history.fire || [];
   const dc = history.dc || [];
@@ -99,6 +102,7 @@ export default function App() {
   }, [selectedArea]);
 
   const selectedStateMeta = useMemo(() => states.find((s) => s.code === selected), [states, selected]);
+  const selectedAreaMeta = useMemo(() => outlook.find((o) => o.id === selectedArea), [outlook, selectedArea]);
 
   return (
     <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
@@ -210,6 +214,14 @@ export default function App() {
               </p>
             )}
 
+            <div className="card map-card" style={{ marginTop: 14 }}>
+              <p className="hint">
+                Each shape is one forecast area within {selectedStateMeta?.name} — click it (or a row below) to see
+                what's happening there.
+              </p>
+              <StateAreaMap areas={outlook} selectedArea={selectedArea} onSelectArea={setSelectedArea} />
+            </div>
+
             <div className="card" style={{ marginTop: 14, overflowX: "auto" }}>
               <table className="outlook-table">
                 <thead>
@@ -222,8 +234,15 @@ export default function App() {
                 </thead>
                 <tbody>
                   {outlook.map((row) => (
-                    <tr key={row.id} onClick={() => setSelectedArea(row.id)}>
-                      <td className="area-id">{row.id}</td>
+                    <tr
+                      key={row.id}
+                      onClick={() => setSelectedArea(row.id)}
+                      style={row.id === selectedArea ? { background: "var(--surface-2)" } : undefined}
+                    >
+                      <td className="area-id">
+                        {row.region || row.id}
+                        <div style={{ fontWeight: 400, fontSize: "0.76rem", color: "var(--ink-3)" }}>{row.id}</div>
+                      </td>
                       <td>
                         <DangerChip danger_class={row.danger_class} />
                       </td>
@@ -237,21 +256,71 @@ export default function App() {
                 </tbody>
               </table>
               <p className="hint" style={{ padding: "0 14px 12px" }}>
-                Click a row to see what's been happening in that area recently.
+                Click a row (or the map above) to see the full picture for that area.
               </p>
             </div>
 
-            {selectedArea && history && (
+            {selectedArea && history && selectedAreaMeta && (
               <div className="card history-panel">
-                <h3>What's going on in {selectedArea}?</h3>
-                {summarizeHistory(
-                  history,
-                  Math.round((outlook.find((o) => o.id === selectedArea)?.root_soil_wetness ?? 0) * 100)
-                ).map((line, i) => (
-                  <p key={i} className="lede" style={{ marginTop: i === 0 ? 0 : 10, fontSize: "0.92rem" }}>
+                <h3>
+                  {selectedAreaMeta.region || selectedArea}{" "}
+                  <span style={{ fontWeight: 400, fontSize: "0.85rem", color: "var(--ink-3)" }}>
+                    ({selectedArea})
+                  </span>
+                </h3>
+
+                <div style={{ marginBottom: 14 }}>
+                  <DangerChip danger_class={selectedAreaMeta.danger_class} />{" "}
+                  <span className="num" style={{ marginLeft: 8, color: "var(--ink-2)" }}>
+                    {Math.round(selectedAreaMeta.danger_prob * 100)}% estimated chance of a fire week in the next 30
+                    days
+                  </span>
+                </div>
+
+                <p className="h-small" style={{ marginBottom: 6 }}>
+                  Why the model thinks this
+                </p>
+                {(selectedAreaMeta.reasons || []).length > 0 ? (
+                  <ul style={{ margin: "0 0 14px", paddingLeft: 18, color: "var(--ink-2)", fontSize: "0.92rem" }}>
+                    {selectedAreaMeta.reasons.map((r, i) => (
+                      <li key={i} style={{ marginBottom: 6 }}>
+                        {r}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="lede" style={{ marginBottom: 14, fontSize: "0.92rem" }}>
+                    Conditions here are close to this area's own normal range for the season — nothing stands out as
+                    unusually dry, hot, or active right now.
+                  </p>
+                )}
+
+                <p className="h-small" style={{ marginBottom: 6 }}>
+                  In plain terms
+                </p>
+                {summarizeHistory(history, Math.round(selectedAreaMeta.root_soil_wetness * 100)).map((line, i) => (
+                  <p key={i} className="lede" style={{ marginTop: i === 0 ? 0 : 8, fontSize: "0.92rem" }}>
                     {line}
                   </p>
                 ))}
+
+                <p className="h-small" style={{ marginTop: 14, marginBottom: -4 }}>
+                  The real data behind that
+                </p>
+                <TrendChart
+                  title="Weekly satellite fire detections"
+                  dates={history.dates}
+                  values={history.fire}
+                  color="#ff6b35"
+                  formatValue={(v) => Math.round(v)}
+                />
+                <TrendChart
+                  title="Modeled 30-day fire-danger probability"
+                  dates={history.dates.slice(-history.dc.length)}
+                  values={history.dc.map((v) => v * 100)}
+                  color={DANGER_HEX[selectedAreaMeta.danger_class] || "#f94144"}
+                  formatValue={(v) => `${Math.round(v)}%`}
+                />
               </div>
             )}
           </section>

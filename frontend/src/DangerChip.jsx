@@ -1,18 +1,10 @@
-const COLORS = {
-  Low: "var(--fd-low)",
-  Moderate: "var(--fd-moderate)",
-  High: "var(--fd-high)",
-  "Very High": "var(--fd-veryhigh)",
-  Extreme: "var(--fd-extreme)",
-};
-
-const DARK_TEXT = { Low: "lo", Moderate: "mo" };
+import { DANGER_DARK_TEXT, DANGER_HEX } from "./dangerColors";
 
 export default function DangerChip({ danger_class }) {
-  const bg = COLORS[danger_class] || "var(--ink-3)";
-  const cls = DARK_TEXT[danger_class] || "";
+  const bg = DANGER_HEX[danger_class] || "#78787f";
+  const isDark = DANGER_DARK_TEXT.has(danger_class);
   return (
-    <span className={`chip${cls ? " " + cls : ""}`} style={{ background: bg }}>
+    <span className={`chip${isDark ? " lo" : ""}`} style={{ background: bg }}>
       {danger_class}
     </span>
   );
