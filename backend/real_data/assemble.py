@@ -7,13 +7,10 @@ Columns: area_id, week_start, t2m_max, precip, gwetroot,
          cpc_temp_prob, cpc_temp_cat, cpc_precip_prob, cpc_precip_cat,
          fire_detections
 
-Request budget per state (confirmed live): 1 FIRMS query sequence for the
-whole state (not per area - fire detections are fetched once for the state's
-full bounding box and bucketed into areas locally, see firms.assign_to_areas),
-one POWER point query per area, and CPC zips are downloaded at most once per
-(year, month) for the whole 50-state run (cached in real_data/cpc.py). Calling
-FIRMS once per area instead (what an earlier version of this did) was enough
-to trip the API's rate limit over a full 50-state history pull.
+FIRMS is queried once per state (not per area - detections are fetched for
+the whole bounding box and bucketed locally, see firms.assign_to_areas) to
+stay under the API's rate limit; POWER is queried once per area; CPC zips
+are cached per (year, month) across the whole run.
 """
 from __future__ import annotations
 
@@ -47,12 +44,8 @@ def _weekly_power(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_cpc_outlook(weekly: pd.DataFrame, lat: float, lon: float) -> pd.DataFrame:
-    """Attaches the CPC outlook that was actually valid for each week's
-    calendar month - not today's outlook stamped across all of history (an
-    earlier version of this did that: it called the CPC fetch once per area
-    using today's date, so every one of the ~100 historical weeks in the
-    cache ended up with the exact same cpc_temp_prob/cat, which is wrong -
-    the whole point is that the outlook changes month to month)."""
+    """Attaches the CPC outlook valid for each week's own calendar month
+    (not today's outlook stamped across all of history)."""
     if weekly.empty:
         for col in ("cpc_temp_prob", "cpc_temp_cat", "cpc_precip_prob", "cpc_precip_cat"):
             weekly[col] = None

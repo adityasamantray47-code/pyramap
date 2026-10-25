@@ -1,13 +1,10 @@
 """
 Forecast areas ("grid") for the Long-Lead Wildfire Outlook.
 
-Simplification note (documented per project rules): each state is split into a
-small number of rectangular lat/lon cells based on its bounding box, not its
-true (irregular) polygon boundary. This avoids needing geopandas/fiona, which
-are hard to install on Windows. Bigger states get more cells, so the whole US
-gets reasonable coverage without needing precise state borders. Each area has
-an id like "CO-1", a centroid lat/lon (used to query NASA POWER and FIRMS,
-and to sample the CPC raster/shapefile), and a bounding box.
+Each state is split into a small number of rectangular lat/lon cells based
+on its bounding box, not its true polygon boundary (avoids needing
+geopandas/fiona). Bigger states get more cells. Each area has an id like
+"CO-1", a centroid lat/lon, and a bounding box.
 """
 from __future__ import annotations
 

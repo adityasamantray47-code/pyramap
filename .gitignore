@@ -11,3 +11,5 @@ node_modules/
 frontend/dist/
 .DS_Store
 all_states.json
+FULL_CODE.md
+MAIN_CODE.md

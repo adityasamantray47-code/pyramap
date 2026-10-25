@@ -1,17 +1,11 @@
 """
 NOAA CPC (Climate Prediction Center) monthly temperature/precipitation outlook.
 
-These are published as zipped shapefiles, one zip per issue month, containing
-several lead times (how many months ahead each shape forecasts). We want the
-shortest lead available (the "next month" outlook). The exact shapefile naming
-and field layout is confirmed by inspecting a real downloaded zip (done once,
-by hand, during setup) rather than guessed here; LEAD_NAME_HINTS below is the
-first thing to update if NOAA changes their naming.
-
-Expected per the task brief: field names "Prob" (probability, 33-100) and
-"Cat" (category). Cat might be encoded as text (B/N/A), or as small integers
-mapped the same way (-1 below, 0 normal, 1 above) depending on the file -
-`normalize_category` below handles both and documents the mapping it used.
+Published as zipped shapefiles, one per issue month, containing several lead
+times. We want the shortest lead (the "next month" outlook) - confirmed
+against a real download that NOAA names it "lead14". Fields are "Prob"
+(33-100) and "Cat" (category, text or small int depending on the file -
+see normalize_category).
 """
 from __future__ import annotations
 
@@ -25,14 +19,12 @@ import shapefile  # pyshp
 
 CPC_BASE_URL = "https://ftp.cpc.ncep.noaa.gov/GIS/us_tempprcpfcst"
 
-# Each zip is ~50MB and a full 2-year, 50-state pull needs ~24 months x 2
-# kinds of them - cached to disk (not just in-memory) so re-running
-# prepare_data.py after an interruption doesn't re-download ~2.4GB.
+# Each zip is ~50MB; cached to disk so re-running prepare_data.py after an
+# interruption doesn't re-download the full set.
 CPC_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data_cache", "cpc_raw")
 
-# Candidate substrings (lowercased) for "shortest lead / next month" shapefiles,
-# checked in order. CPC's naming has used "lead14" (half-month lead counted in
-# half-months: lead 0.5 month) in some releases, and "mon1"/"01" in others.
+# Substrings (lowercased) for "shortest lead / next month" shapefiles, checked
+# in order. "lead14" is confirmed; the rest are fallbacks if NOAA renames.
 LEAD_NAME_HINTS = ["lead14", "mon1", "m01", "_01_", "lead1"]
 
 CATEGORY_MAP = {
@@ -61,10 +53,7 @@ def _download_zip_bytes(year: int, month: int, kind: str, timeout: int) -> bytes
 
 
 def download_zip(year: int, month: int, kind: str = "seastemp", timeout: int = 30) -> zipfile.ZipFile:
-    """kind is 'seastemp' (temperature) or 'seasprcp' (precipitation).
-    The outlook only depends on (year, month, kind) - not on location - so
-    every forecast area in every state reuses the same cached download
-    instead of re-fetching this ~50MB zip per area."""
+    """kind is 'seastemp' (temperature) or 'seasprcp' (precipitation)."""
     content = _download_zip_bytes(year, month, kind, timeout)
     return zipfile.ZipFile(io.BytesIO(content))
 
@@ -122,10 +111,8 @@ def nearest_record(records: list[dict], lat: float, lon: float) -> dict | None:
 
 @functools.lru_cache(maxsize=64)
 def records_for_issue(year: int, month: int, kind: str) -> tuple[dict, ...] | None:
-    """Downloaded zip + shortest-lead shapefile, parsed into records, cached
-    by (year, month, kind) - so sampling the same month's outlook at 6+
-    different forecast-area coordinates only downloads and parses it once.
-    Returns None if that issue's zip/shapefile isn't available."""
+    """Parsed records for one issue's shortest-lead shapefile, cached by
+    (year, month, kind) so sampling many areas only parses it once."""
     try:
         zf = download_zip(year, month, kind)
     except Exception:
@@ -138,12 +125,9 @@ def records_for_issue(year: int, month: int, kind: str) -> tuple[dict, ...] | No
 
 
 def outlook_for_month(lat: float, lon: float, target_year: int, target_month: int) -> dict:
-    """The outlook that was actually valid for calendar month
-    (target_year, target_month): the "next month" (lead14) shape from the
-    zip issued the month before. Falls back to earlier issue months (which
-    then means a slightly longer lead, e.g. lead13's 3-month window) if that
-    issue isn't published, so very recent or very old months still get
-    *something* instead of nothing."""
+    """The outlook valid for (target_year, target_month): the next-month
+    shape from the zip issued the month before, falling back to earlier
+    issues if that one isn't published."""
     issue_year, issue_month = target_year, target_month - 1
     if issue_month <= 0:
         issue_month += 12

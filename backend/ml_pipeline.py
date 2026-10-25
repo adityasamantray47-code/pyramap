@@ -1,13 +1,9 @@
 """
 Feature engineering + model for the 30-day-ahead wildfire danger outlook.
 
-One row of weekly data per forecast area becomes one training example:
-features describe the last ~4 weeks of weather/soil plus the current CPC
-monthly outlook; the label is whether a "fire week" (>= FIRE_MIN_DETECTIONS
-satellite fire detections in that area that week) happens anywhere in the
-4 weeks starting ~30 days later. That's the "long lead" part: the model
-only sees information that would have actually been available 30 days
-before the thing it's predicting.
+Each row is one (area, week): features describe the last ~4 weeks of
+weather/soil plus the current CPC outlook; the label is whether a "fire
+week" happens anywhere in the 4 weeks starting ~30 days later.
 """
 from __future__ import annotations
 
@@ -16,41 +12,12 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import brier_score_loss, roc_auc_score
 
-# "Fire week" threshold: an area's own FIRE_PERCENTILE of its weekly VIIRS
-# detection counts, floored at FIRE_MIN_DETECTIONS.
-#
-# A single global absolute count doesn't fit every state. Calibrated against
-# real Colorado data, a flat threshold of 3 flagged 50% of all area-weeks as
-# "fire weeks" (meaningless - barely better than a coin flip); 20 brought
-# that to ~11%, a reasonable Colorado-specific number. But Texas's routine
-# winter/spring agricultural and rangeland burning alone produces far more
-# VIIRS detections per week than Colorado's wildfire season does (confirmed
-# live: Texas forecast areas have a 90th-percentile weekly count of 60-680,
-# vs. Colorado's 5-100) - so the flat threshold of 20 flagged ~96% of all
-# Texas weeks as "dangerous," which is just as uninformative as the original
-# threshold of 3 was for Colorado.
-#
-# Comparing each area against its OWN typical activity instead asks "is this
-# an unusually active week for this specific place," which is the thing that
-# actually matters for a danger signal, and adapts automatically per region
-# without needing a per-state constant maintained by hand. FIRE_MIN_DETECTIONS
-# is now just a floor, so a near-zero-activity area (e.g. coastal New England)
-# doesn't flag on single-digit background noise.
+# "Fire week" = an area's own 90th-percentile weekly detection count,
+# floored at 20. Adaptive per area because a flat threshold doesn't
+# generalize (e.g. Texas's routine agricultural burning alone exceeds
+# Colorado's wildfire-season counts).
 FIRE_PERCENTILE = 0.90
 FIRE_MIN_DETECTIONS = 20
-
-
-def area_fire_thresholds(df: pd.DataFrame) -> dict[str, float]:
-    """One threshold per area_id, from that area's own historical
-    fire_detections distribution. Uses the whole history passed in (not
-    split by train/test) - this defines what "fire week" MEANS for an area,
-    which is a label-definition choice, not a per-row feature value, so it
-    doesn't leak test-period information into training features the way
-    area_climatology did (see train_model). A test-period extreme can still
-    nudge the threshold itself slightly; that's an accepted simplification,
-    not the severe feature-level leak that was fixed there."""
-    p = df.groupby("area_id")["fire_detections"].quantile(FIRE_PERCENTILE)
-    return p.clip(lower=FIRE_MIN_DETECTIONS).to_dict()
 
 LEAD_WEEKS = 4  # ~30 days
 LOOKBACK_WEEKS = 4
@@ -64,40 +31,34 @@ FEATURE_COLUMNS = [
 ]
 
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """df: raw weekly per-area data (area_id, week_start, t2m_max, precip,
-    gwetroot, cpc_*, fire_detections). Returns one row per (area, week) with
-    engineered features + the forward-looking label, sorted chronologically
-    within each area.
+def area_fire_thresholds(df: pd.DataFrame) -> dict[str, float]:
+    """One fire-week threshold per area, from its own detection history."""
+    p = df.groupby("area_id")["fire_detections"].quantile(FIRE_PERCENTILE)
+    return p.clip(lower=FIRE_MIN_DETECTIONS).to_dict()
 
-    Does NOT include area_climatology here - see _month_rate_map /
-    _attach_climatology. It used to be computed once up front from the
-    entire dataset (train+test combined), which let a test-period row's
-    climatology value partially encode that same row's own label (each
-    area/month combination only occurs ~2x across 2 years of history, so a
-    test instance could be ~50% of its own "historical" rate). Climatology
-    must be fit after the train/test split - train-only for evaluation,
-    full-history for the deployed model - so it's attached by the caller
-    (train_model) instead of baked in here."""
+
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per (area, week): engineered features + forward-looking
+    label. area_climatology is NOT included here - it's attached after the
+    train/test split (see train_model) so it can't leak test-period labels
+    into training features."""
     df = df.sort_values(["area_id", "week_start"]).reset_index(drop=True)
     thresholds = area_fire_thresholds(df)
 
     rows = []
     for area_id, g in df.groupby("area_id"):
         g = g.reset_index(drop=True)
-        n = len(g)
         threshold = thresholds[area_id]
-        for i in range(n):
+        for i in range(len(g)):
             lo = max(0, i - LOOKBACK_WEEKS + 1)
             window = g.iloc[lo : i + 1]
             if len(window) < 2:
                 continue  # not enough history yet
             future = g.iloc[i + 1 : i + 1 + LEAD_WEEKS]
             if len(future) < LEAD_WEEKS:
-                continue  # not enough future data to know the label (end of series)
+                continue  # end of series, no label available
 
             woy = g.loc[i, "week_start"].isocalendar().week
-
             rows.append(
                 {
                     "area_id": area_id,
@@ -119,10 +80,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _month_rate_map(features: pd.DataFrame) -> dict[tuple[str, int], float]:
-    """Per-area, per-calendar-month historical rate of the forward-looking
-    fire-week label, from whichever rows are passed in. Callers decide
-    whether that's train-only rows (leak-free evaluation) or every row
-    (best available climatology for the deployed model)."""
+    """Per-area, per-month historical rate of the fire-week label."""
     tmp = features.copy()
     tmp["month"] = tmp["week_start"].dt.month
     return tmp.groupby(["area_id", "month"])["label"].mean().to_dict()
@@ -136,69 +94,51 @@ def _attach_climatology(features: pd.DataFrame, clim_map: dict, default: float) 
 
 
 def fire_week_frequency(df: pd.DataFrame) -> float:
-    """Fraction of (area, week) rows that qualify as a fire week under each
-    area's own adaptive threshold (area_fire_thresholds). Used to sanity-
-    check that threshold - if this is near 1.0, it's too low (everything
-    looks dangerous); near 0 with zero positive weeks anywhere, too high."""
+    """Fraction of (area, week) rows that qualify as a fire week."""
     thresholds = area_fire_thresholds(df)
     threshold_per_row = df["area_id"].map(thresholds)
-    fire_week = df["fire_detections"] >= threshold_per_row
-    return float(fire_week.mean())
+    return float((df["fire_detections"] >= threshold_per_row).mean())
 
 
 def train_test_split_chronological(features: pd.DataFrame, test_fraction: float = 0.2):
-    """Splits by week_start (not randomly) so the test set is always later in
-    time than training - the realistic way to evaluate a forecast model."""
+    """Splits by week_start (not randomly), so test is always later than train."""
     cutoff = features["week_start"].quantile(1 - test_fraction)
     train = features[features["week_start"] < cutoff]
     test = features[features["week_start"] >= cutoff]
     return train, test
 
 
+def _make_rf() -> RandomForestClassifier:
+    return RandomForestClassifier(n_estimators=200, max_depth=8, min_samples_leaf=5, class_weight="balanced", random_state=42)
+
+
 def train_model(features: pd.DataFrame) -> dict:
     train, test = train_test_split_chronological(features)
     if train["label"].nunique() < 2 or len(test) == 0:
-        # Low/no-fire-activity states (e.g. GA, LA, ME, NH, SC, VT over this
-        # 2-year window) never have enough fire weeks for RandomForest to
-        # learn anything - area_climatology (this area's own history for the
-        # time of year) is a reasonable fallback that still varies
-        # meaningfully by area and season instead of refusing to answer.
+        # Too little fire activity to train on - fall back to climatology.
         return _climatology_fallback(features, train, test)
 
-    # Leak-free evaluation: climatology fit on TRAIN rows only, then applied
-    # to both splits, so a test row's climatology value can never be derived
-    # from that same row's own (or any other test-period) label.
+    # Leak-free evaluation: climatology fit on train rows only, applied to both splits.
     train_clim_map = _month_rate_map(train)
     train_default = float(train["label"].mean())
     train_eval = _attach_climatology(train, train_clim_map, train_default)
     test_eval = _attach_climatology(test, train_clim_map, train_default)
 
-    X_train, y_train = train_eval[FEATURE_COLUMNS], train_eval["label"]
-    X_test, y_test = test_eval[FEATURE_COLUMNS], test_eval["label"]
+    eval_model = _make_rf()
+    eval_model.fit(train_eval[FEATURE_COLUMNS], train_eval["label"])
 
-    eval_model = RandomForestClassifier(
-        n_estimators=200, max_depth=8, min_samples_leaf=5, class_weight="balanced", random_state=42
-    )
-    eval_model.fit(X_train, y_train)
-
-    probs = eval_model.predict_proba(X_test)[:, 1]
+    probs = eval_model.predict_proba(test_eval[FEATURE_COLUMNS])[:, 1]
+    y_test = test_eval["label"]
     roc_auc = roc_auc_score(y_test, probs) if y_test.nunique() > 1 else float("nan")
     brier = brier_score_loss(y_test, probs)
-
     brier_baseline = brier_score_loss(y_test, test_eval["area_climatology"])
     brier_skill = 1 - (brier / brier_baseline) if brier_baseline > 0 else float("nan")
 
-    # Deployed model: refit on ALL data using the best-available climatology
-    # (fit on the full history, not just the train split) - standard practice
-    # once a holdout split has given an honest performance estimate above.
-    # There's no leakage risk here: "now" has no future to leak from.
+    # Deployed model: refit on everything with full-history climatology
+    # (legitimate - no future to leak from at serving time).
     full_clim_map = _month_rate_map(features)
-    full_default = float(features["label"].mean())
-    features_full = _attach_climatology(features, full_clim_map, full_default)
-
-    final_model = RandomForestClassifier(
-        n_estimators=200, max_depth=8, min_samples_leaf=5, class_weight="balanced", random_state=42
-    )
+    features_full = _attach_climatology(features, full_clim_map, float(features["label"].mean()))
+    final_model = _make_rf()
     final_model.fit(features_full[FEATURE_COLUMNS], features_full["label"])
 
     importances = dict(zip(FEATURE_COLUMNS, final_model.feature_importances_))
@@ -221,10 +161,8 @@ def train_model(features: pd.DataFrame) -> dict:
 
 
 class ClimatologyModel:
-    """Fallback "model" for states/areas with too little real fire activity
-    to train a RandomForest on (see train_model). Just returns each row's
-    own area_climatology feature as its probability - not learned, but still
-    a real, area- and season-specific number rather than a constant."""
+    """Fallback for states with too little fire activity to train on:
+    returns each row's area_climatology as its probability."""
 
     feature_importances_ = np.array([1.0 if f == "area_climatology" else 0.0 for f in FEATURE_COLUMNS])
 
@@ -246,15 +184,12 @@ def _climatology_fallback(features: pd.DataFrame, train: pd.DataFrame, test: pd.
         "note": "too little real fire activity in this window to train a model - showing area/season climatology instead",
     }
     if len(train) > 0 and len(test) > 0 and test["label"].nunique() > 1:
-        # Same leak-free pattern as train_model: fit on train rows only, apply to test.
         train_clim_map = _month_rate_map(train)
-        train_default = float(train["label"].mean())
-        test_eval = _attach_climatology(test, train_clim_map, train_default)
+        test_eval = _attach_climatology(test, train_clim_map, float(train["label"].mean()))
         probs = model.predict_proba(test_eval[FEATURE_COLUMNS])[:, 1]
         metrics["brier_score"] = round(float(brier_score_loss(test_eval["label"], probs)), 4)
         metrics["roc_auc"] = round(float(roc_auc_score(test_eval["label"], probs)), 3)
 
-    # Deployed "model": full-history climatology, same as the main path.
     full_clim_map = _month_rate_map(features) if len(features) else {}
     full_default = float(features["label"].mean()) if len(features) else 0.0
     features_full = _attach_climatology(features, full_clim_map, full_default)
@@ -280,13 +215,11 @@ def danger_class(prob: float) -> str:
 
 
 def predict_latest(model, features: pd.DataFrame) -> pd.DataFrame:
-    """One row per area: its most recent feature row + predicted 30-day-ahead
-    fire-danger probability and class."""
+    """One row per area: its most recent feature row + predicted probability/class."""
     latest = features.sort_values("week_start").groupby("area_id").tail(1).reset_index(drop=True)
     if latest.empty:
         return latest
-    probs = model.predict_proba(latest[FEATURE_COLUMNS])[:, 1]
     latest = latest.copy()
-    latest["danger_prob"] = probs
+    latest["danger_prob"] = model.predict_proba(latest[FEATURE_COLUMNS])[:, 1]
     latest["danger_class"] = latest["danger_prob"].apply(danger_class)
     return latest

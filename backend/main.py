@@ -1,6 +1,7 @@
 """FastAPI app for the Long-Lead Wildfire Outlook."""
 from __future__ import annotations
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -45,10 +46,7 @@ def _get_state_bundle(state: str) -> dict:
 
     df, source = data_ingestion.load_state_data(state)
     features = ml_pipeline.build_features(df)
-    try:
-        result = ml_pipeline.train_model(features)
-    except ValueError as exc:
-        raise HTTPException(status_code=500, detail=f"Could not train model for {state}: {exc}")
+    result = ml_pipeline.train_model(features)
 
     bundle = {
         "model": result["model"],
@@ -133,7 +131,7 @@ def area_history(area_id: str, days: int = 120):
     raw = bundle["raw"]
     area_raw = raw[raw["area_id"] == area_id].sort_values("week_start")
 
-    cutoff = area_raw["week_start"].max() - pd_timedelta(days)
+    cutoff = area_raw["week_start"].max() - pd.Timedelta(days=days)
     area_raw = area_raw[area_raw["week_start"] >= cutoff]
     area_features = area_features[area_features["week_start"] >= cutoff]
 
@@ -147,9 +145,3 @@ def area_history(area_id: str, days: int = 120):
         "fire": area_raw["fire_detections"].tolist(),
         "dc": [round(float(p), 3) for p in probs],
     }
-
-
-def pd_timedelta(days: int):
-    import pandas as pd
-
-    return pd.Timedelta(days=days)

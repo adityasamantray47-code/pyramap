@@ -1,18 +1,10 @@
 """
-Synthetic ("practice") data generator.
+Synthetic ("practice") data generator - same weekly schema as
+real_data/assemble.py produces, used as a fallback whenever real data for a
+state hasn't been downloaded yet.
 
-This produces data in the exact same weekly schema that real_data/assemble.py
-produces from NASA POWER + NASA FIRMS + NOAA CPC. It's used whenever real data
-for a state hasn't been downloaded yet (or a real source fails), so the rest
-of the app (features, model, API, frontend) always has something to run on.
-
-Schema (one row per area per ISO week), columns:
-  area_id, week_start (date), t2m_max, precip, gwetroot,
-  cpc_temp_prob, cpc_temp_cat, cpc_precip_prob, cpc_precip_cat,
-  fire_detections
-
-cpc_*_cat is one of "below", "normal", "above" (next-month outlook category).
-fire_detections is the count of satellite fire detections that week in the area.
+Columns: area_id, week_start, t2m_max, precip, gwetroot, cpc_temp_prob,
+cpc_temp_cat, cpc_precip_prob, cpc_precip_cat, fire_detections.
 """
 from __future__ import annotations
 
@@ -40,12 +32,8 @@ def _fire_season_weight(week_of_year: int, lat: float) -> float:
 
 
 def _aridity_factor(lon: float) -> float:
-    """Rough proxy for the west-of-the-100th-meridian aridity gradient in the
-    US: the west is drier and far more fire-prone on average than the humid
-    east, which an earlier version of this generator ignored (giving every
-    state, including wet eastern ones, an unrealistically high fire-week
-    rate). 0.15 (humid east) to 1.0 (arid west); not meant to be precise,
-    just enough to keep practice data roughly regionally plausible."""
+    """Rough west-of-the-100th-meridian aridity gradient (0.15 humid east to
+    1.0 arid west) so practice data stays regionally plausible."""
     return float(np.clip((-100 - lon) / 15, 0.15, 1.0))
 
 
@@ -58,7 +46,7 @@ def generate_area_series(area_id: str, lat: float, lon: float, weeks: int = WEEK
     aridity = _aridity_factor(lon)
     rows = []
     soil = 0.35 + rng.normal(0, 0.03)
-    for i, week_start in enumerate(dates):
+    for week_start in dates:
         woy = week_start.isocalendar().week
         season = _fire_season_weight(woy, lat)
 
@@ -76,7 +64,6 @@ def generate_area_series(area_id: str, lat: float, lon: float, weeks: int = WEEK
 
         # CPC-style monthly outlook, imperfectly anticipating the next month's
         # actual anomaly (gives the model *some* real lead-time signal).
-        future_idx = min(i + 4, weeks - 1)
         temp_signal = rng.normal(0, 1) * 0.5 + (1 if season > 0.3 else -1 if season < -0.3 else 0) * 0.5
         precip_signal = -temp_signal + rng.normal(0, 0.6)
         cpc_temp_cat = "above" if temp_signal > 0.3 else "below" if temp_signal < -0.3 else "normal"

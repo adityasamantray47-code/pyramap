@@ -30,16 +30,9 @@ def has_real_data(state: str) -> bool:
 
 
 def _clean_real_data(df: pd.DataFrame) -> pd.DataFrame:
-    """The forecast-area grid is rectangular bounding boxes, not true state
-    borders (see grid.py), so a coastal state's grid can include a cell
-    that's mostly or entirely open water - e.g. Texas's southeast corner
-    cell is in the Gulf of Mexico. NASA POWER has weather data everywhere,
-    but GWETROOT (land-surface soil moisture) is undefined there, which
-    produced an area with ~100% missing gwetroot and crashed JSON
-    serialization downstream (NaN isn't valid JSON). Areas mostly missing
-    core weather data get dropped entirely (not a meaningful wildfire
-    forecast area); small real gaps elsewhere get filled from neighboring
-    weeks in the same area."""
+    """Drops areas mostly missing core weather data (the rectangular grid
+    can land a cell entirely in open water, e.g. coastal Texas, where
+    GWETROOT is undefined) and fills small gaps from neighboring weeks."""
     numeric_cols = ["t2m_max", "precip", "gwetroot"]
     missing_frac = df.groupby("area_id")[numeric_cols].apply(lambda g: g.isna().mean().max())
     bad_areas = missing_frac[missing_frac > 0.3].index.tolist()
