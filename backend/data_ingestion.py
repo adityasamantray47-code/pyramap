@@ -29,6 +29,28 @@ def has_real_data(state: str) -> bool:
     return os.path.exists(cache_path(state))
 
 
+def _clean_real_data(df: pd.DataFrame) -> pd.DataFrame:
+    """The forecast-area grid is rectangular bounding boxes, not true state
+    borders (see grid.py), so a coastal state's grid can include a cell
+    that's mostly or entirely open water - e.g. Texas's southeast corner
+    cell is in the Gulf of Mexico. NASA POWER has weather data everywhere,
+    but GWETROOT (land-surface soil moisture) is undefined there, which
+    produced an area with ~100% missing gwetroot and crashed JSON
+    serialization downstream (NaN isn't valid JSON). Areas mostly missing
+    core weather data get dropped entirely (not a meaningful wildfire
+    forecast area); small real gaps elsewhere get filled from neighboring
+    weeks in the same area."""
+    numeric_cols = ["t2m_max", "precip", "gwetroot"]
+    missing_frac = df.groupby("area_id")[numeric_cols].apply(lambda g: g.isna().mean().max())
+    bad_areas = missing_frac[missing_frac > 0.3].index.tolist()
+    if bad_areas:
+        df = df[~df["area_id"].isin(bad_areas)].copy()
+
+    df = df.sort_values(["area_id", "week_start"])
+    df[numeric_cols] = df.groupby("area_id")[numeric_cols].transform(lambda g: g.ffill().bfill())
+    return df
+
+
 def load_state_data(state: str) -> tuple[pd.DataFrame, str]:
     """Returns (dataframe, source) where source is "real" or "synthetic"."""
     path = cache_path(state)
@@ -36,7 +58,7 @@ def load_state_data(state: str) -> tuple[pd.DataFrame, str]:
         df = pd.read_csv(path, parse_dates=["week_start"])
         missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
         if not missing:
-            return df, "real"
+            return _clean_real_data(df), "real"
     df = synthetic_data.generate_state_dataframe(state)
     df["week_start"] = pd.to_datetime(df["week_start"])
     return df, "synthetic"
