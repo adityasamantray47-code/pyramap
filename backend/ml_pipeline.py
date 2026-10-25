@@ -119,7 +119,12 @@ def train_test_split_chronological(features: pd.DataFrame, test_fraction: float 
 def train_model(features: pd.DataFrame) -> dict:
     train, test = train_test_split_chronological(features)
     if train["label"].nunique() < 2 or len(test) == 0:
-        raise ValueError("Not enough label variety or test data to train/evaluate a model.")
+        # Low/no-fire-activity states (e.g. GA, LA, ME, NH, SC, VT over this
+        # 2-year window) never have enough fire weeks for RandomForest to
+        # learn anything - area_climatology (this area's own history for the
+        # time of year) is a reasonable fallback that still varies
+        # meaningfully by area and season instead of refusing to answer.
+        return _climatology_fallback(features, train, test)
 
     X_train, y_train = train[FEATURE_COLUMNS], train["label"]
     X_test, y_test = test[FEATURE_COLUMNS], test["label"]
@@ -152,6 +157,43 @@ def train_model(features: pd.DataFrame) -> dict:
             "positive_rate": round(float(features["label"].mean()), 4),
         },
         "feature_importance": [{"feature": f, "importance": round(float(v), 4)} for f, v in top_features],
+    }
+
+
+class ClimatologyModel:
+    """Fallback "model" for states/areas with too little real fire activity
+    to train a RandomForest on (see train_model). Just returns each row's
+    own area_climatology feature as its probability - not learned, but still
+    a real, area- and season-specific number rather than a constant."""
+
+    feature_importances_ = np.array([1.0 if f == "area_climatology" else 0.0 for f in FEATURE_COLUMNS])
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        p = X["area_climatology"].fillna(0.0).clip(0.0, 1.0).to_numpy()
+        return np.column_stack([1 - p, p])
+
+
+def _climatology_fallback(features: pd.DataFrame, train: pd.DataFrame, test: pd.DataFrame) -> dict:
+    model = ClimatologyModel()
+    metrics = {
+        "roc_auc": None,
+        "brier_score": None,
+        "brier_score_baseline": None,
+        "brier_skill_score": None,
+        "n_train": int(len(train)),
+        "n_test": int(len(test)),
+        "positive_rate": round(float(features["label"].mean()), 4) if len(features) else 0.0,
+        "note": "too little real fire activity in this window to train a model - showing area/season climatology instead",
+    }
+    if len(test) > 0 and test["label"].nunique() > 1:
+        probs = model.predict_proba(test[FEATURE_COLUMNS])[:, 1]
+        metrics["brier_score"] = round(float(brier_score_loss(test["label"], probs)), 4)
+        if test["label"].nunique() > 1:
+            metrics["roc_auc"] = round(float(roc_auc_score(test["label"], probs)), 3)
+    return {
+        "model": model,
+        "metrics": metrics,
+        "feature_importance": [{"feature": "area_climatology", "importance": 1.0}],
     }
 
 

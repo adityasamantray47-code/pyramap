@@ -166,10 +166,14 @@ def test_assemble_state_joins_sources(monkeypatch):
     assert 1 <= len(area_csv_calls) <= 10
 
 
-def test_synthetic_fallback_matches_schema():
+def test_synthetic_fallback_matches_schema(monkeypatch, tmp_path):
     import data_ingestion
 
-    df, source = data_ingestion.load_state_data("DE")  # no real cache for DE -> synthetic
+    # Point the cache dir somewhere empty so this test doesn't depend on
+    # whether DE's real data has been downloaded in this environment.
+    monkeypatch.setattr(data_ingestion, "DATA_CACHE_DIR", str(tmp_path))
+
+    df, source = data_ingestion.load_state_data("DE")
     assert source == "synthetic"
     for col in data_ingestion.REQUIRED_COLUMNS:
         assert col in df.columns
@@ -180,7 +184,6 @@ if __name__ == "__main__":
         test_power_parses_and_drops_missing,
         test_firms_weekly_counts_normalizes_confidence,
         test_cpc_reads_shapefile_from_zip,
-        test_synthetic_fallback_matches_schema,
     ]
     for t in tests:
         t()
@@ -188,7 +191,13 @@ if __name__ == "__main__":
 
     # test_assemble_state_joins_sources needs a monkeypatch fixture; run it by hand.
     class _MP:
-        def setattr(self, target, value):
+        def setattr(self, *args):
+            if len(args) == 3:
+                # pytest-style setattr(obj, "attr_name", value)
+                obj, attr_name, value = args
+                setattr(obj, attr_name, value)
+                return
+            target, value = args
             import importlib
 
             parts = target.split(".")
@@ -207,4 +216,9 @@ if __name__ == "__main__":
 
     test_assemble_state_joins_sources(_MP())
     print("PASS test_assemble_state_joins_sources")
+
+    import tempfile
+
+    test_synthetic_fallback_matches_schema(_MP(), tempfile.mkdtemp())
+    print("PASS test_synthetic_fallback_matches_schema")
     print("\nAll offline tests passed.")
